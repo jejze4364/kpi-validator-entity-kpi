@@ -392,6 +392,7 @@ def run(data, abs_tolerance=0.01, rel_tolerance=0.0001):
 
 def report(payload, filtered=None):
     """Gera o relatório Excel para download."""
+
     data = (
         filtered.copy()
         if filtered is not None
@@ -410,29 +411,99 @@ def report(payload, filtered=None):
     output = BytesIO()
 
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        data.to_excel(writer, index=False, sheet_name="Comparacao")
-        summary.to_excel(writer, index=False, sheet_name="Resumo")
+
+        data.to_excel(
+            writer,
+            index=False,
+            sheet_name="Comparacao"
+        )
+
+        summary.to_excel(
+            writer,
+            index=False,
+            sheet_name="Resumo"
+        )
 
         comparison_sheet = writer.sheets["Comparacao"]
         summary_sheet = writer.sheets["Resumo"]
 
         comparison_sheet.freeze_panes(1, 0)
         summary_sheet.freeze_panes(1, 0)
-        comparison_sheet.autofilter(0, 0, len(data), len(data.columns) - 1)
-        summary_sheet.autofilter(0, 0, len(summary), len(summary.columns) - 1)
+
+        if len(data.columns) > 0:
+            comparison_sheet.autofilter(
+                0,
+                0,
+                len(data),
+                len(data.columns) - 1
+            )
+
+        if len(summary.columns) > 0:
+            summary_sheet.autofilter(
+                0,
+                0,
+                len(summary),
+                len(summary.columns) - 1
+            )
+
+        # =========================
+        # AJUSTE DE LARGURA ROBUSTO
+        # =========================
 
         for index, column in enumerate(data.columns):
-            width = max(
-                len(str(column)),
-                data[column].astype(str).map(len).max() if not data.empty else 0,
+
+            try:
+
+                if data.empty:
+                    width = len(str(column))
+
+                else:
+                    width = max(
+                        len(str(column)),
+                        int(
+                            data[column]
+                            .fillna("")
+                            .astype(str)
+                            .str.len()
+                            .max()
+                        )
+                    )
+
+            except Exception:
+                width = max(len(str(column)), 20)
+
+            comparison_sheet.set_column(
+                index,
+                index,
+                min(width + 2, 45)
             )
-            comparison_sheet.set_column(index, index, min(width + 2, 45))
 
         for index, column in enumerate(summary.columns):
-            width = max(
-                len(str(column)),
-                summary[column].astype(str).map(len).max() if not summary.empty else 0,
+
+            try:
+
+                if summary.empty:
+                    width = len(str(column))
+
+                else:
+                    width = max(
+                        len(str(column)),
+                        int(
+                            summary[column]
+                            .fillna("")
+                            .astype(str)
+                            .str.len()
+                            .max()
+                        )
+                    )
+
+            except Exception:
+                width = max(len(str(column)), 20)
+
+            summary_sheet.set_column(
+                index,
+                index,
+                min(width + 2, 45)
             )
-            summary_sheet.set_column(index, index, min(width + 2, 45))
 
     return output.getvalue()
