@@ -1,170 +1,83 @@
 from datetime import datetime
-import pandas as pd, streamlit as st
-from engine import run, report
+import pandas as pd
+import streamlit as st
+from engine import STATUS_ORDER, report, run
 
-st.set_page_config(
-    page_title='KPI Validator',
-    page_icon='📊',
-    layout='wide'
-)
-
-st.title('KPI Validator | ENTITY + KPI_CODE')
-
-st.caption(
-    'Leitura otimizada de SHAREPOINT, LOGS, BOPS, SL e Definition Book.'
-)
+st.set_page_config(page_title="KPI Validator", page_icon="📊", layout="wide")
+st.title("KPI Validator | SHAREPOINT x ANAPLAN")
+st.caption("O aplicativo le exclusivamente as abas SHAREPOINT e ANAPLAN.")
 
 with st.sidebar:
-    at = st.number_input(
-        'Tolerância absoluta',
-        0.0,
-        value=.01
-    )
+    st.subheader("Configuracoes")
+    absolute_tolerance = st.number_input("Tolerancia absoluta", min_value=0.0, value=0.01, format="%.6f")
+    relative_tolerance = st.number_input("Tolerancia relativa", min_value=0.0, value=0.0001, format="%.6f")
+    st.divider()
+    include_bops = st.checkbox("Incluir BOPS", value=True)
+    include_sl = st.checkbox("Incluir SL", value=True)
 
-    rt = st.number_input(
-        'Tolerância relativa',
-        0.0,
-        value=.0001
-    )
-
-u = st.file_uploader(
-    'Consolidador',
-    type=['xlsx', 'xlsm']
-)
-
-if not u:
+uploaded = st.file_uploader("Arquivo Excel", type=["xlsx", "xlsm"])
+if not uploaded:
+    st.info("Selecione o arquivo com as abas SHAREPOINT e ANAPLAN.")
     st.stop()
 
-with st.spinner('Processando...'):
-    p = run(
-        u.getvalue(),
-        at,
-        rt
-    )
-
-if p.get('error'):
-    st.error(p['error'])
-    st.write(p.get('resolved'))
-    st.write(p.get('maps'))
+with st.spinner("Processando SHAREPOINT e ANAPLAN..."):
+    payload = run(uploaded.getvalue(), absolute_tolerance, relative_tolerance)
+if payload.get("error"):
+    st.error(payload["error"])
     st.stop()
 
-x = pd.concat(
-    p['results'],
-    ignore_index=True
-)
+data = pd.concat(payload["results"], ignore_index=True)
+if not include_bops:
+    data = data[data["TIPO"] != "BOPS"]
+if not include_sl:
+    data = data[data["TIPO"] != "SL"]
 
-ok = int(
-    (x["STATUS"] == "OK").sum()
-)
+countries = sorted(value for value in data["COUNTRY"].dropna().unique() if str(value).strip())
+operations = sorted(value for value in data["BUSINESS_OPERATION"].dropna().unique() if str(value).strip())
+filter_country, filter_operation = st.columns(2)
+selected_countries = filter_country.multiselect("Pais", countries, default=countries, placeholder="Todos os paises")
+selected_operations = filter_operation.multiselect("Business Operation", operations, default=operations, placeholder="Todas as operacoes")
+if countries:
+    data = data[data["COUNTRY"].isin(selected_countries)]
+if operations:
+    data = data[data["BUSINESS_OPERATION"].isin(selected_operations)]
 
-div = int(
-    (x["STATUS"] == "DIVERGENTE").sum()
-)
+st.markdown("""
+**Legenda dos status**
+- 🟢 **OK:** valores dentro da tolerancia.
+- 🔴 **DIVERGENTE:** os valores de SHAREPOINT e ANAPLAN sao diferentes.
+- 🟠 **NAO ESTA NO SHAREPOINT:** a chave existe somente no ANAPLAN.
+- 🟡 **SOMENTE NO SHAREPOINT:** a chave existe somente no SHAREPOINT.
+- ⚪ **VALOR INVALIDO:** nao foi possivel comparar os valores.
+""")
 
-nao_comparados = int(
-    x["STATUS"].isin(
-        [
-            "NÃO ESTÁ NO SHAREPOINT",
-            "SOMENTE NO SHAREPOINT"
-        ]
-    ).sum()
-)
+comparable = data["STATUS"].isin(["OK", "DIVERGENTE"])
+ok_count = int(data["STATUS"].eq("OK").sum())
+divergent_count = int(data["STATUS"].eq("DIVERGENTE").sum())
+comparable_count = int(comparable.sum())
+metric1, metric2, metric3, metric4 = st.columns(4)
+metric1.metric("Comparaveis", comparable_count)
+metric2.metric("OK", ok_count)
+metric3.metric("Divergencias", divergent_count)
+metric4.metric("Conformidade", f"{ok_count / comparable_count * 100:.2f}%" if comparable_count else "0.00%")
 
-base_conformidade = ok + div
-
-conf = (
-    ok / base_conformidade * 100
-    if base_conformidade > 0
-    else 0
-)
-
-a, b, c, d = st.columns(4)
-
-a.metric(
-    "OK",
-    f"{ok:,}"
-)
-
-b.metric(
-    "Divergentes",
-    f"{div:,}"
-)
-
-c.metric(
-    "Não Comparados",
-    f"{nao_comparados:,}"
-)
-
-d.metric(
-    "Conformidade",
-    f"{conf:.2f}%"
-)
-
-t1, t2, t3 = st.tabs(
-    [
-        'Resumo',
-        'Comparação',
-        'Exportar'
-    ]
-)
-
-with t1:
-
-    st.dataframe(
-        x.groupby(
-            ['SOURCE', 'STATUS']
-        )
-        .size()
-        .reset_index(
-            name='QUANTIDADE'
-        ),
-        use_container_width=True,
-        hide_index=True
-    )
-
-with t2:
-
-    s = st.multiselect(
-        'Status',
-        sorted(x.STATUS.unique()),
-        default=sorted(x.STATUS.unique())
-    )
-
-    q = st.text_input(
-        'Buscar Entity ou KPI'
-    )
-
-    v = x[
-        x.STATUS.isin(s)
-    ]
-
-    if q:
-        v = v[
-            v.ENTITY.str.contains(
-                q,
-                case=False,
-                na=False
-            )
-            |
-            v.KPI_CODE.str.contains(
-                q,
-                case=False,
-                na=False
-            )
-        ]
-
-    st.dataframe(
-        v,
-        use_container_width=True,
-        hide_index=True,
-        height=620
-    )
-
-with t3:
-
+summary_tab, comparison_tab, export_tab = st.tabs(["Resumo", "Comparacao", "Exportar"])
+with summary_tab:
+    summary = data.groupby(["COUNTRY", "BUSINESS_OPERATION", "STATUS"], dropna=False).size().reset_index(name="QUANTIDADE")
+    st.dataframe(summary, use_container_width=True, hide_index=True)
+with comparison_tab:
+    available_statuses = [status for status in STATUS_ORDER if status in data["STATUS"].unique()]
+    selected_statuses = st.multiselect("Status", available_statuses, default=available_statuses)
+    search = st.text_input("Buscar Entity ou KPI Code")
+    view = data[data["STATUS"].isin(selected_statuses)]
+    if search:
+        view = view[view["ENTITY"].str.contains(search, case=False, na=False, regex=False) | view["KPI_CODE"].str.contains(search, case=False, na=False, regex=False)]
+    st.dataframe(view, use_container_width=True, hide_index=True, height=620)
+with export_tab:
     st.download_button(
-        'Baixar Excel',
-        report(p),
-        f'KPI_Entity_KPI_{datetime.now():%Y%m%d_%H%M%S}.xlsx',
-        type='primary'
+        "Baixar Excel",
+        report(payload, data),
+        f"KPI_Validator_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
     )
