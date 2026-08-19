@@ -507,3 +507,40 @@ def report(payload, filtered=None):
             )
 
     return output.getvalue()
+def blank_template():
+
+    output = BytesIO()
+
+    sharepoint = pd.DataFrame(
+        columns=[
+            "KPI_CODE",
+            "ENTITY",
+            "COUNTRY",
+            "VALUE"
+        ]
+    )
+
+    anaplan = pd.DataFrame(
+        columns=[
+            "KPI_CODE",
+            "ENTITY",
+            "SOURCE_BASE",
+            "VALUE"
+        ]
+    )
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+
+        sharepoint.to_excel(
+            writer,
+            sheet_name="SHAREPOINT",
+            index=False
+        )
+
+        anaplan.to_excel(
+            writer,
+            sheet_name="ANAPLAN",
+            index=False
+        )
+
+    return output.getvalue()
