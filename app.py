@@ -1,7 +1,8 @@
 from datetime import datetime
 import pandas as pd
 import streamlit as st
-from engine import STATUS_ORDER, report, run
+from engine import STATUS_ORDER, report, run, blank_template
+
 
 st.set_page_config(page_title="KPI Validator", page_icon="📊", layout="wide")
 st.title("KPI Validator | SHAREPOINT x ANAPLAN")
@@ -81,3 +82,11 @@ with export_tab:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
     )
+    
+st.download_button(
+    "📥 Baixar Template Padrão",
+    data=blank_template(),
+    file_name="Template_KPI_Padrao.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    type="primary"
+)
