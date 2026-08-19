@@ -22,10 +22,6 @@ ABAS_ANAPLAN = (ABA_LOGS, ABA_BOPS, ABA_SL)
 # Indices Python, equivalentes a F/L/R, B/H e E no VBA.
 COLUNA_KPI_SHAREPOINT = 5
 COLUNA_ENTITY_SHAREPOINT = 11
-COLUNA_FILTRO_SHAREPOINT = _coluna_por_nomes(
-    sharepoint,
-    ["COUNTRY", "PAIS", "FILTRO", "FILTRO / PAÍS", "FILTRO / PAIS"]
-)
 COLUNA_ENTITY_ANAPLAN = 1
 COLUNA_KPI_ANAPLAN = 7
 COLUNA_KPI_DEFINITION_BOOK = 4
@@ -104,7 +100,7 @@ def cabecalhos_unicos(cabecalhos: Iterable[Any]) -> list[str]:
 
 
 def remover_vazios(df: pd.DataFrame) -> pd.DataFrame:
-    return df.dropna(axis=0, how="all").dropna(axis=1, how="all").reset_index(drop=True)
+    return df.dropna(axis=0, how="all").reset_index(drop=True)
 
 
 def linha_cabecalho_real(fonte: Any, nome_aba: str) -> int:
@@ -161,22 +157,47 @@ def valores_unicos_ordenados(serie: pd.Series) -> list[str]:
     return sorted(valores.values(), key=normalizar_texto)
 
 
+def localizar_coluna_filtro_sharepoint(df: pd.DataFrame) -> str:
+    candidatos = {
+        "COUNTRY", "COUNTRY CODE", "COUNTRY_CODE", "PAIS",
+        "FILTRO", "FILTRO / PAIS", "FILTRO PAIS",
+        "FILTRO / PAIS (SHAREPOINT)", "FILTRO PAIS SHAREPOINT",
+    }
+    normalizados = {normalizar_texto(c).replace("_", " "): c for c in df.columns}
+    for candidato in candidatos:
+        chave = normalizar_texto(candidato).replace("_", " ")
+        if chave in normalizados:
+            return normalizados[chave]
+    for normalizado, original in normalizados.items():
+        if normalizado == "COUNTRY" or "FILTRO" in normalizado and "PAIS" in normalizado:
+            return original
+    if len(df.columns) >= 18:
+        return str(df.columns[17])
+    raise ValueError(
+        "Nao foi localizada a coluna de filtro/pais na aba SHAREPOINT. "
+        "Cabecalhos encontrados: " + ", ".join(map(str, df.columns))
+    )
+
+
 def carregar_opcoes_template(fonte: Any | None = None) -> list[str]:
     origem, excel = validar_consolidador(fonte)
     sp = ler_sharepoint(origem, excel)
-    _validar_indice(sp, COLUNA_FILTRO_SHAREPOINT, "filtro/país do SHAREPOINT")
-    return valores_unicos_ordenados(sp.iloc[:, COLUNA_FILTRO_SHAREPOINT])
+    coluna_filtro = localizar_coluna_filtro_sharepoint(sp)
+    return valores_unicos_ordenados(sp[coluna_filtro])
 
 
 def carregar_kpis_entidades(filtro_selecionado: str, fonte: Any | None = None) -> tuple[list[str], list[str]]:
     origem, excel = validar_consolidador(fonte)
     sp = ler_sharepoint(origem, excel)
-    for indice, desc in ((COLUNA_KPI_SHAREPOINT, "KPI"), (COLUNA_ENTITY_SHAREPOINT, "entidade"), (COLUNA_FILTRO_SHAREPOINT, "filtro/país")):
-        _validar_indice(sp, indice, desc)
-    mascara = sp.iloc[:, COLUNA_FILTRO_SHAREPOINT].map(chave_comparacao).eq(chave_comparacao(filtro_selecionado))
+    _validar_indice(sp, COLUNA_KPI_SHAREPOINT, "KPI")
+    _validar_indice(sp, COLUNA_ENTITY_SHAREPOINT, "entidade")
+    coluna_filtro = localizar_coluna_filtro_sharepoint(sp)
+    mascara = sp[coluna_filtro].map(chave_comparacao).eq(chave_comparacao(filtro_selecionado))
     filtrado = sp.loc[mascara]
-    return valores_unicos_ordenados(filtrado.iloc[:, COLUNA_KPI_SHAREPOINT]), valores_unicos_ordenados(filtrado.iloc[:, COLUNA_ENTITY_SHAREPOINT])
-
+    return (
+        valores_unicos_ordenados(filtrado.iloc[:, COLUNA_KPI_SHAREPOINT]),
+        valores_unicos_ordenados(filtrado.iloc[:, COLUNA_ENTITY_SHAREPOINT]),
+    )
 
 def _selecionados(valores: Iterable[Any]) -> set[str]:
     return {chave_comparacao(v) for v in valores if chave_comparacao(v)}
@@ -184,23 +205,25 @@ def _selecionados(valores: Iterable[Any]) -> set[str]:
 
 def _filtrar_sharepoint(sp: pd.DataFrame, filtro: str, kpis: Iterable[str], entidades: Iterable[str]) -> pd.DataFrame:
     ks, es = _selecionados(kpis), _selecionados(entidades)
+    coluna_filtro = localizar_coluna_filtro_sharepoint(sp)
     mascara = (
-        sp.iloc[:, COLUNA_FILTRO_SHAREPOINT].map(chave_comparacao).eq(chave_comparacao(filtro))
+        sp[coluna_filtro].map(chave_comparacao).eq(chave_comparacao(filtro))
         & sp.iloc[:, COLUNA_KPI_SHAREPOINT].map(chave_comparacao).isin(ks)
         & sp.iloc[:, COLUNA_ENTITY_SHAREPOINT].map(chave_comparacao).isin(es)
     )
     return sp.loc[mascara].copy().reset_index(drop=True)
 
-
 def _dicionario_filtro(sp: pd.DataFrame) -> dict[str, str]:
     resultado: dict[str, str] = {}
+    coluna_filtro = localizar_coluna_filtro_sharepoint(sp)
     for _, linha in sp.iterrows():
-        kpi, entidade, filtro = linha.iloc[COLUNA_KPI_SHAREPOINT], linha.iloc[COLUNA_ENTITY_SHAREPOINT], texto_limpo(linha.iloc[COLUNA_FILTRO_SHAREPOINT])
+        kpi = linha.iloc[COLUNA_KPI_SHAREPOINT]
+        entidade = linha.iloc[COLUNA_ENTITY_SHAREPOINT]
+        filtro = texto_limpo(linha[coluna_filtro])
         chave = montar_chave(entidade, kpi)
         if chave != "|" and filtro and chave not in resultado:
             resultado[chave] = filtro
     return resultado
-
 
 def _chaves_sp(sp: pd.DataFrame) -> set[str]:
     return {montar_chave(l.iloc[COLUNA_ENTITY_SHAREPOINT], l.iloc[COLUNA_KPI_SHAREPOINT]) for _, l in sp.iterrows()}
@@ -294,7 +317,7 @@ def _formatar(writer: pd.ExcelWriter, aba: str, df: pd.DataFrame) -> None:
 def gerar_template_do_consolidador(filtro_selecionado: str, kpis_selecionados: Iterable[str], entidades_selecionadas: Iterable[str], fonte: Any | None = None) -> dict[str, Any]:
     kpis_selecionados, entidades_selecionadas = list(kpis_selecionados), list(entidades_selecionadas)
     if not texto_limpo(filtro_selecionado):
-        raise ValueError("Selecione uma opção da coluna R.")
+        raise ValueError("Selecione uma opcao de filtro/pais da aba SHAREPOINT.")
     if not kpis_selecionados:
         raise ValueError("Selecione pelo menos um KPI.")
     if not entidades_selecionadas:
