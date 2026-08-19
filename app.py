@@ -7,7 +7,13 @@ from engine import STATUS_ORDER, report, run, blank_template
 st.set_page_config(page_title="KPI Validator", page_icon="📊", layout="wide")
 st.title("KPI Validator | SHAREPOINT x ANAPLAN")
 st.caption("O aplicativo le exclusivamente as abas SHAREPOINT e ANAPLAN.")
-
+st.download_button(
+    "📥 Baixar Template Padrão",
+    data=blank_template(),
+    file_name="Template_KPI_Padrao.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    type="primary"
+)
 with st.sidebar:
     st.subheader("Configuracoes")
     absolute_tolerance = st.number_input("Tolerancia absoluta", min_value=0.0, value=0.01, format="%.6f")
@@ -82,11 +88,3 @@ with export_tab:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
     )
-    
-st.download_button(
-    "📥 Baixar Template Padrão",
-    data=blank_template(),
-    file_name="Template_KPI_Padrao.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    type="primary"
-)
